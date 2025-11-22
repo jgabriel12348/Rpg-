@@ -76,7 +76,7 @@ Please read our [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of co
 This project is the result of months of dedicated work. If this tool brings fun to your table, consider supporting the development to keep the servers running and the coffee flowing.
 
 * [**GitHub Sponsors**](https://github.com/sponsors/MatheusPereiraSilva)
-* [**LivePix**]([LINK_AQUI](https://livepix.gg/devmp))
+* **Brasil (Pix Rápido):** [LivePix](https://livepix.gg/devmp)
 
 ## ⚖️ License
 

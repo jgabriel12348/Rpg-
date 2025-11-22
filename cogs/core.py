@@ -1,0 +1,168 @@
+# Copyright (C) 2025 Matheus Pereira
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# TRADEMARK NOTICE: The name "Roll & Play Bot" and its logo are distinct
+# from the software and are NOT covered by the AGPL. They remain the
+# exclusive property of the author.
+
+import re
+import discord
+from discord.ext import commands
+from discord import app_commands
+from utils import dice_roller
+from utils.i18n import t as t_raw
+from utils.locale_resolver import resolve_locale
+from view.rolling.dice_hub_view import DiceHubView
+
+def _tr(key: str, locale: str, fallback: str, **kwargs) -> str:
+    try:
+        text = t_raw(key, locale, **kwargs)
+    except Exception:
+        return fallback.format(**kwargs) if kwargs else fallback
+    if text == key:
+        try:
+            return fallback.format(**kwargs) if kwargs else fallback
+        except Exception:
+            return fallback
+    return text
+
+
+def localized_command(name_pt, desc_pt, name_en, desc_en):
+    def decorator(func):
+        cmd = app_commands.command(name=name_pt, description=desc_pt)(func)
+        cmd.name_localizations = {"en-US": name_en, "en-GB": name_en}
+        cmd.description_localizations = {"en-US": desc_en, "en-GB": desc_en}
+        return cmd
+    return decorator
+
+
+def _normalize_locale(loc: str | None) -> str:
+    if not loc:
+        return "pt"
+    loc = str(loc).lower()
+    if loc.startswith("pt"):
+        return "pt"
+    if loc.startswith("en"):
+        return "en"
+    return "pt"
+
+
+def _guess_message_locale(message: discord.Message) -> str:
+    try:
+        if message.guild and getattr(message.guild, "preferred_locale", None):
+            return _normalize_locale(message.guild.preferred_locale)
+    except Exception:
+        pass
+    return "pt"
+
+
+class CoreCog(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        try:
+            dice_roller.set_bot_instance(bot)
+        except Exception:
+            pass
+
+    @localized_command(
+        name_pt="dado", desc_pt="Abrir o hub de rolagens (ataque, testes, iniciativa).",
+        name_en="dice", desc_en="Open the rolling hub (attack, checks, initiative)."
+    )
+    async def dado(self, interaction: discord.Interaction):
+        loc = resolve_locale(interaction, fallback="pt")
+        title = _tr("player.dice.hub.title", loc, "🎲 Centro de Rolagens")
+        view = DiceHubView(user=interaction.user, loc=loc)
+        await interaction.response.send_message(content=title, view=view, ephemeral=True)
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if not message.content or message.author.bot:
+            return
+
+        content = message.content.strip()
+        looks_like_roll = bool(re.search(r'(^\s*\d+\s*#)|(\bd\d+)|(\d+d\d+)', content, flags=re.IGNORECASE))
+        adv_token = re.match(r'^\s*(adv|vantagem|advantage)\b', content, flags=re.IGNORECASE)
+        dis_token = re.match(r'^\s*(dis|desvantagem|disadvantage)\b', content, flags=re.IGNORECASE)
+
+        if not (looks_like_roll or adv_token or dis_token):
+            return
+
+        loc = _guess_message_locale(message)
+
+        try:
+            expr = content
+            advantage_state = "normal"
+            if adv_token:
+                advantage_state = "vantagem"
+                expr = re.sub(r'^\s*(adv|vantagem|advantage)\b[:\-]*\s*', '', expr, flags=re.IGNORECASE)
+            elif dis_token:
+                advantage_state = "desvantagem"
+                expr = re.sub(r'^\s*(dis|desvantagem|disadvantage)\b[:\-]*\s*', '', expr, flags=re.IGNORECASE)
+
+            repeat = 1
+            m_repeat = re.match(r'^\s*(\d+)\s*#\s*(.+)$', expr, flags=re.IGNORECASE)
+            if m_repeat:
+                repeat = max(1, int(m_repeat.group(1)))
+                expr = m_repeat.group(2).strip()
+
+            def _apply_adv(expr_in: str, mode: str) -> str:
+                if mode not in ("vantagem", "desvantagem"):
+                    return expr_in
+                def repl(match):
+                    prefix = match.group(1) or ""
+                    if mode == "vantagem":
+                        return f"{prefix}2d20kh1"
+                    return f"{prefix}2d20kl1"
+                return re.sub(r'(?i)\b(\d*)d20\b(?!k[hl]\d)', repl, expr_in, count=1)
+
+            expr = _apply_adv(expr, advantage_state)
+            expr = re.sub(r'(?i)(^|[^0-9a-zA-Z_])d(\d+)', r'\g<1>1d\2', expr)
+            results = []
+            for _ in range(repeat):
+                total, breakdown = await dice_roller.roll_dice(expr)
+                results.append((total, breakdown))
+
+            title_single = _tr("roll.free.title.single", loc, "🎲 Rolagem")
+            title_multi = _tr("roll.free.title.multi", loc, "🎲 Rolagens ({count})", count=repeat)
+            details_label = _tr("roll.free.details", loc, "Detalhes")
+
+            if repeat == 1:
+                total, breakdown = results[0]
+                embed = discord.Embed(
+                    title=title_single,
+                    description=f"## {total}",
+                    color=discord.Color.blurple()
+                )
+                embed.add_field(name=details_label, value=f"`{breakdown}`", inline=False)
+            else:
+                embed = discord.Embed(
+                    title=title_multi,
+                    color=discord.Color.blurple()
+                )
+                lines = []
+                for i, (total, breakdown) in enumerate(results, start=1):
+                    lines.append(f"**#{i}** → **{total}**  ·  `{breakdown}`")
+                embed.description = "\n".join(lines)
+
+            embed.set_author(name=message.author.display_name, icon_url=message.author.display_avatar.url)
+
+            await message.channel.send(embed=embed)
+
+        except Exception:
+            err = _tr("roll.free.error", loc, "❌ Não consegui interpretar essa rolagem. Tente algo como `1d20+5`.")
+            await message.channel.send(err)
+
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(CoreCog(bot))

@@ -1,0 +1,16 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ambientes Virtuais (pasta venv ou env)
+venv/
+env/
+.env
+discloud.config
+# Logs
+*.log
+
+# IDEs (configurações do seu VSCode/Pycharm que ninguém precisa ver)
+.vscode/
+.idea/

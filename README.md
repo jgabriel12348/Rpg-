@@ -1,3 +1,9 @@
+Este repositório é uma versão modificada do projeto original:
+https://github.com/MatheusPereiraSilva/Roll-Play
+
+Autor original: Matheus Pereira Silva
+Modificações feitas por: João Gabriel
+
 # Roll & Play Bot
 
 ![License](https://img.shields.io/github/license/[SEU-USUARIO]/[NOME-DO-REPO]?style=for-the-badge)
